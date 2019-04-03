@@ -1,6 +1,9 @@
 import logging
 import time
+from StringIO import StringIO
+from unittest import SkipTest
 from tasks.cephfs.fuse_mount import FuseMount
+from tasks.cephfs.kernel_mount import KernelMount
 from tasks.cephfs.cephfs_test_case import CephFSTestCase
 
 log = logging.getLogger(__name__)
@@ -114,11 +117,19 @@ class TestExports(CephFSTestCase):
             self._wait_subtrees(status, 0, [('/1', 0), ('/1/4/5', 1), ('/a', 1), ('/a/b/aa/bb', 0)])
 
         # Test getfattr
-        self.assertTrue(self.mount_a.getfattr("1", "ceph.dir.pin") == "0")
-        self.assertTrue(self.mount_a.getfattr("1/4", "ceph.dir.pin") == "-1")
-        self.assertTrue(self.mount_a.getfattr("1/4/5", "ceph.dir.pin") == "1")
-        if (len(self.fs.get_active_names()) > 2):
-            self.assertTrue(self.mount_a.getfattr("1/2/3", "ceph.dir.pin") == "2")
+        def test_getfattr():
+            if isinstance(self.mount_a, KernelMount):
+                p = self.mount_a.client_remote.run(args=['uname', '-r'], stdout=StringIO(), wait=True)
+                dir_pin = self.mount_a.getfattr("1", "ceph.dir.pin")
+                log.debug("mount.getfattr('1','ceph.dir.pin'): %s " % dir_pin)
+	        if str(p.stdout.getvalue()) < "5" and not(dir_pin):
+	            raise SkipTest("Require FUSE client")
+            self.assertTrue(self.mount_a.getfattr("1", "ceph.dir.pin") == "0")
+            self.assertTrue(self.mount_a.getfattr("1/4", "ceph.dir.pin") == "-1")
+            self.assertTrue(self.mount_a.getfattr("1/4/5", "ceph.dir.pin") == "1")
+            if (len(self.fs.get_active_names()) > 2):
+                self.assertTrue(self.mount_a.getfattr("1/2/3", "ceph.dir.pin") == "2")
+        test_getfattr()
 
     def test_session_race(self):
         """
