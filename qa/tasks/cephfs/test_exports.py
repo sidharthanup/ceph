@@ -119,11 +119,12 @@ class TestExports(CephFSTestCase):
         # Test getfattr
         def test_getfattr():
             if isinstance(self.mount_a, KernelMount):
+                self.skipTest("Require FUSE client2")
                 p = self.mount_a.client_remote.run(args=['uname', '-r'], stdout=StringIO(), wait=True)
                 dir_pin = self.mount_a.getfattr("1", "ceph.dir.pin")
                 log.debug("mount.getfattr('1','ceph.dir.pin'): %s " % dir_pin)
 	        if str(p.stdout.getvalue()) < "5" and not(dir_pin):
-	            raise SkipTest("Require FUSE client")
+	            self.skipTest("Require FUSE client")
             self.assertTrue(self.mount_a.getfattr("1", "ceph.dir.pin") == "0")
             self.assertTrue(self.mount_a.getfattr("1/4", "ceph.dir.pin") == "-1")
             self.assertTrue(self.mount_a.getfattr("1/4/5", "ceph.dir.pin") == "1")
@@ -137,6 +138,8 @@ class TestExports(CephFSTestCase):
 
         See: https://tracker.ceph.com/issues/24072#change-113056
         """
+        if not isinstance(self.mount_a, FuseMount):
+            raise SkipTest("Required FUSE client3")
 
         self.fs.set_max_mds(2)
         status = self.fs.wait_for_daemons()
