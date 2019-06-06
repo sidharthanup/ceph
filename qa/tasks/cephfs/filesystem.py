@@ -579,6 +579,10 @@ class Filesystem(MDSCluster):
     def set_allow_new_snaps(self, yes):
         self.set_var("allow_new_snaps", yes, '--yes-i-really-mean-it')
 
+    def create_snapshot(self, path, snapshot_name):
+        snap_shot = path + ".snap/" + snapshot_name
+        self.mon_manager.raw_cluster_cmd("mkdir", snapshot_name)
+
     # In Octopus+, the PG count can be omitted to use the default. We keep the
     # hard-coded value for deployments of Mimic/Nautilus.
     pgs_per_fs_pool = 8
