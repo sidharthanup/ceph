@@ -5101,6 +5101,7 @@ void CInode::maybe_export_pin(bool update)
 
   mds_rank_t export_pin = get_export_pin(false);
   if (export_pin == MDS_RANK_NONE && !update)
+    maybe_export_ephemeral_pin();
     return;
 
   if (state_test(CInode::STATE_QUEUEDEXPORTPIN))
@@ -5129,6 +5130,36 @@ void CInode::maybe_export_pin(bool update)
       state_set(CInode::STATE_QUEUEDEXPORTPIN);
       mdcache->export_pin_queue.insert(this);
       break;
+    }
+  }
+}
+
+void CInode::maybe_export_ephemeral_pin()
+{
+  if (export_ephemeral_random) {
+    // check if its already pinned - yet to implement. See tracker ticket for concern I had.
+    if (g_conf()->mds_export_ephemeral_random >= ceph::util::generate_random_number(0.0, 1.0)) {
+      ephemeral_export_random_pin = mdcache->mds->mdsmap->put_ino_in_consistent_hash_ring(ino());
+      bool queue = false;
+      for (auto p = dirfrags.begin(); p != dirfrags.end(); p++) {
+        CDir *dir = p->second;
+        if (!dir->is_auth())
+          continue;
+        if (dir->is_subtree_root()) {
+          // set auxsubtree bit or export it
+          if (!dir->state_test(CDir::STATE_AUXSUBTREE) ||
+              export_pin != dir->get_dir_auth().first)
+            queue = true;
+        } else {
+        // create aux subtree or export it
+        queue = true;
+        }
+        if (queue) {
+          state_set(CInode::STATE_QUEUEDEXPORTPIN);
+          mdcache->export_pin_queue.insert(this);
+          break;
+        }
+      }
     }
   }
 }
