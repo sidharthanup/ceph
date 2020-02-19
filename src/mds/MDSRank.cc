@@ -2858,6 +2858,8 @@ void MDSRank::command_get_subtrees(Formatter *f)
       f->dump_int("auth_first", dir->get_dir_auth().first);
       f->dump_int("auth_second", dir->get_dir_auth().second);
       f->dump_int("export_pin", dir->inode->get_export_pin());
+      f->dump_int("is_export_ephemeral_distributed_pinned", dir->inode->is_export_ephemeral_distributed_pinned);
+      f->dump_int("is_export_ephemeral_random_pinned_pinned", dir->inode->is_export_ephemeral_random_pinned);
       f->open_object_section("dir");
       dir->dump(f);
       f->close_section();
