@@ -454,8 +454,10 @@ void CInode::pop_and_dirty_projected_inode(LogSegment *ls)
   if (new_export_pin)
     maybe_export_pin(true);
 
+  /* Brand new inode, maybe it should be random ephemerally pinned: */
   if (front.inode.version == 1)
     maybe_export_ephemeral_random_pin();
+
   if (inode.is_backtrace_updated())
     mark_dirty_parent(ls, old_pool != inode.layout.pool_id);
 
@@ -5145,32 +5147,21 @@ int64_t CInode::get_backtrace_pool() const
   }
 }
 
-void CInode::maybe_export_pin(bool update)
+void CInode::queue_export_pin(mds_rank_t target)
 {
-  if (!g_conf()->mds_bal_export_pin)
-    return;
-  if (!is_dir() || !is_normal())
-    return;
-
-  mds_rank_t export_pin = get_export_pin(false);
-  if (export_pin == MDS_RANK_NONE && !update) {
-    maybe_export_ephemeral_distributed_pin();
-    return;
-  }
-
   if (state_test(CInode::STATE_QUEUEDEXPORTPIN))
     return;
 
   bool queue = false;
-  for (auto p = dirfrags.begin(); p != dirfrags.end(); p++) {
-    CDir *dir = p->second;
+  for (auto& p : dirfrags) {
+    CDir *dir = p.second;
     if (!dir->is_auth())
       continue;
-    if (export_pin != MDS_RANK_NONE) {
+    if (target != MDS_RANK_NONE) {
       if (dir->is_subtree_root()) {
 	// set auxsubtree bit or export it
 	if (!dir->state_test(CDir::STATE_AUXSUBTREE) ||
-	    export_pin != dir->get_dir_auth().first)
+	    target != dir->get_dir_auth().first)
 	  queue = true;
       } else {
 	// create aux subtree or export it
@@ -5188,112 +5179,64 @@ void CInode::maybe_export_pin(bool update)
   }
 }
 
-void CInode::maybe_export_ephemeral_random_pin(bool update)
+void CInode::maybe_export_pin(bool update)
 {
-  bool export_ephemeral_random_config = mdcache->get_export_ephemeral_random_config();
-
-  //If the config isn't set then return
-  if (!export_ephemeral_random_config)
+  if (!g_conf()->mds_bal_export_pin)
+    return;
+  if (!is_dir() || !is_normal())
     return;
 
-  //Check if it's already ephemerally pinned
-  if (is_export_ephemeral_random_pinned && !update)
-      return;
-
-  if (export_ephemeral_random_config) {
-    double export_ephemeral_random_pin = get_export_ephemeral_random_pin(false);
-    if ((update || export_ephemeral_random_pin >=
-          ceph::util::generate_random_number(0.0, 1.0))
-        && is_export_ephemeral_distributed_pinned == false) {
-
-      dout(10) << "I'm here under ephemeral random because is_export_ephemeral_distributed is" << is_export_ephemeral_distributed_pinned << dendl;
-
-      is_export_ephemeral_random_migrating = true;
-
-      bool queue = false;
-      for (auto& p : dirfrags) {
-        CDir *dir = p.second;
-        if (!dir->is_auth())
-          continue;
-        if (dir->is_subtree_root()) {
-          // set auxsubtree bit or export it
-          if (!dir->state_test(CDir::STATE_AUXSUBTREE) ||
-            mdcache->hash_into_rank_bucket(ino(), mdcache->mds->mdsmap->get_max_mds()) != dir->get_dir_auth().first)
-            queue = true;
-        } else {
-            // create aux subtree or export it
-            queue = true;
-        }
-        if (queue) {
-          if (mdcache->hash_into_rank_bucket(ino(), mdcache->mds->mdsmap->get_max_mds()) == mdcache->mds->get_nodeid())
-            mdcache->ephemeral_pin(ephemeral_pin_inode);
-          state_set(CInode::STATE_QUEUEDEXPORTPIN);
-          mdcache->export_pin_queue.insert(this);
-          break;
-        }
-      }
-      return;
-    }
+  mds_rank_t export_pin = get_export_pin(false);
+  if (export_pin == MDS_RANK_NONE && !update) {
+    maybe_export_ephemeral_distributed_pin();
+    return;
   }
+
+  queue_export_pin(export_pin);
 }
 
 void CInode::maybe_export_ephemeral_distributed_pin(bool update)
 {
-  bool export_ephemeral_distributed_config = mdcache->get_export_ephemeral_distributed_config();
-
-  //If both the configs aren't set then return
-  if (!export_ephemeral_distributed_config)
+  if (mdcache->get_export_ephemeral_distributed_config()) {
     return;
+  } else if (!is_dir() || !is_normal()) {
+    return;
+  } else if (state_test(CInode::STATE_DISTEPHEMERALPIN) && !update) {
+    /* already pinned */
+    return;
+  }
 
-  //Check if it's already ephemerally pinned
-  if (is_export_ephemeral_distributed_pinned && !update)
-      return;
+  auto dir = get_parent_dir();
+  if (!dir) {
+    return;
+  }
 
-  if (export_ephemeral_distributed_config) {
-    CDentry *pdn = get_parent_dn();
+  if (dir->get_inode()->get_inode().export_ephemeral_distributed_pin) {
+    state_set(CInode::STATE_DISTEPHEMERALPIN);
+    queue_export_pin(mdcache->hash_into_rank_bucket(ino()));
+  } else {
+    state_clear(CInode::STATE_DISTEPHEMERALPIN);
+  }
+}
 
-    if (!pdn) {
-      return;
-    }
+void CInode::maybe_export_ephemeral_random_pin()
+{
+  if (!mdcache->get_export_ephemeral_random_config()) {
+    return;
+  } else if (!is_dir() || !is_normal()) {
+    return;
+  } else if (state_test(CInode::STATE_RANDEPHEMERALPIN)) {
+    /* already pinned... but this shouldn't happen */
+    return;
+  }
 
-    auto dir = pdn->get_dir();
+  double export_ephemeral_random_pin = get_export_ephemeral_random_pin();
+  double n = ceph::util::generate_random_number(0.0, 1.0);
 
-    if (get_export_ephemeral_distributed_pin() && dir->get_num_head_items()) {
-      for (auto& bound : bounds) {
-        bound->maybe_export_ephemeral_distributed_pin();
-      }
-    }
-
-    else if (update || (dir->get_inode()->get_export_ephemeral_distributed_pin())) {
-      is_export_ephemeral_distributed_migrating = true;
-
-      bool queue = false;
-      for (auto& p : dirfrags) {
-	CDir *dir = p.second;
-	if (!dir->is_auth())
-	  continue;
-	if (dir->is_subtree_root()) {
-	  // set auxsubtree bit or export it
-          if (!dir->state_test(CDir::STATE_AUXSUBTREE) ||
-            mdcache->hash_into_rank_bucket(ino(), mdcache->mds->mdsmap->get_max_mds()) != dir->get_dir_auth().first)
-            queue = true;
-        } else {
-        // create aux subtree or export it
-        queue = true;
-        }
-        if (queue) {
-          dout(10) << "max_mds is" << mdcache->mds->mdsmap->get_max_mds() << "and target mds is:" << mdcache->hash_into_rank_bucket(ino(), mdcache->mds->mdsmap->get_max_mds()) << dendl;
-          if (mdcache->hash_into_rank_bucket(ino(), mdcache->mds->mdsmap->get_max_mds()) == mdcache->mds->get_nodeid()) {
-            mdcache->ephemeral_pin(ephemeral_pin_inode);
-            dout(10) << "Inside if inside the else" << dendl;
-          }
-          state_set(CInode::STATE_QUEUEDEXPORTPIN);
-          mdcache->export_pin_queue.insert(this);
-          break;
-        }
-      }
-      return;
-    }
+  if (n <= export_ephemeral_random_pin) {
+    dout(10) << "randomly export pinning " << *this << dendl;
+    state_set(CInode::STATE_RANDEPHEMERALPIN);
+    queue_export_pin(mdcache->hash_into_rank_bucket(ino()));
   }
 }
 
@@ -5347,9 +5290,7 @@ mds_rank_t CInode::get_export_pin(bool inherit) const
 
 double CInode::get_export_ephemeral_random_pin(bool inherit) const
 {
-  /* An inode that is export pinned may not necessarily be a subtree root, we
-   * need to traverse the parents. A base or system inode cannot be pinned.
-   * N.B. inodes not yet linked into a dir (i.e. anonymous inodes) will not
+  /* N.B. inodes not yet linked into a dir (i.e. anonymous inodes) will not
    * have a parent yet.
    */
   const CInode *in = this;
@@ -5370,14 +5311,6 @@ double CInode::get_export_ephemeral_random_pin(bool inherit) const
     in = pdn->get_dir()->inode;
   }
   return 0;
-}
-
-bool CInode::get_export_ephemeral_distributed_pin() const
-{
-  if (get_inode().export_ephemeral_distributed_pin)
-    return get_inode().export_ephemeral_distributed_pin;
-  else
-    return false;
 }
 
 bool CInode::is_exportable(mds_rank_t dest) const

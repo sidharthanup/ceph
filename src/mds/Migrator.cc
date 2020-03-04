@@ -2192,6 +2192,11 @@ void Migrator::export_finish(CDir *dir)
   if (dir->state_test(CDir::STATE_AUXSUBTREE))
     dir->state_clear(CDir::STATE_AUXSUBTREE);
 
+  //if (dir->get_inode()->is_export_ephemeral_distributed_migrating)
+  //  dir->get_inode()->finish_export_ephemeral_distributed_migration();
+  //else if (dir->get_inode()->is_export_ephemeral_random_migrating)
+  //  dir->get_inode()->finish_export_ephemeral_random_migration();
+
   // discard delayed expires
   cache->discard_delayed_expire(dir);
 
@@ -2235,11 +2240,6 @@ void Migrator::export_finish(CDir *dir)
     mds->locker->drop_locks(mut.get());
     mut->cleanup();
   }
-
-  if (dir->get_inode()->is_export_ephemeral_distributed_migrating)
-    dir->get_inode()->finish_export_ephemeral_distributed_migration();
-  else if (dir->get_inode()->is_export_ephemeral_random_migrating)
-    dir->get_inode()->finish_export_ephemeral_random_migration();
 
   if (parent)
     child_export_finish(parent, true);
@@ -3140,6 +3140,7 @@ void Migrator::import_finish(CDir *dir, bool notify, bool last)
   MutationRef mut = it->second.mut;
   import_state.erase(it);
 
+#if 0
   // start the journal entry
   EImportFinish *le = new EImportFinish(dir, true);
   mds->mdlog->start_entry(le);
@@ -3163,6 +3164,9 @@ void Migrator::import_finish(CDir *dir, bool notify, bool last)
 
   // log it
   mds->mdlog->submit_entry(le);
+#else
+  mds->mdlog->start_submit_entry(new EImportFinish(dir, true));
+#endif
 
   // process delayed expires
   cache->process_delayed_expire(dir);

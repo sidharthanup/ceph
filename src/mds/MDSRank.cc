@@ -2858,8 +2858,9 @@ void MDSRank::command_get_subtrees(Formatter *f)
       f->dump_int("auth_first", dir->get_dir_auth().first);
       f->dump_int("auth_second", dir->get_dir_auth().second);
       f->dump_int("export_pin", dir->inode->get_export_pin());
-      f->dump_int("is_export_ephemeral_distributed_pinned", dir->inode->is_export_ephemeral_distributed_pinned);
-      f->dump_int("is_export_ephemeral_random_pinned_pinned", dir->inode->is_export_ephemeral_random_pinned);
+      f->dump_bool("distributed_ephemeral_pin", dir->inode->is_distributed_ephemerally_pinned());
+      f->dump_bool("random_ephemeral_pin", dir->inode->is_random_ephemerally_pinned());
+      f->dump_int("ephemeral_pin", mdcache->hash_into_rank_bucket(dir->inode->ino()));
       f->open_object_section("dir");
       dir->dump(f);
       f->close_section();

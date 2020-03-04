@@ -438,20 +438,24 @@ private:
   // return remote pointer to to-be-journaled inode
   void add_primary_dentry(CDentry *dn, CInode *in, bool dirty,
 			  bool dirty_parent=false, bool dirty_pool=false,
-			  bool need_snapflush=false, bool export_ephemeral_distributed=false,
-			  bool export_ephemeral_random=false) {
+			  bool need_snapflush=false) {
     __u8 state = 0;
     if (dirty) state |= fullbit::STATE_DIRTY;
     if (dirty_parent) state |= fullbit::STATE_DIRTYPARENT;
     if (dirty_pool) state |= fullbit::STATE_DIRTYPOOL;
     if (need_snapflush) state |= fullbit::STATE_NEED_SNAPFLUSH;
-    if (export_ephemeral_distributed) state |= fullbit::STATE_EPHEMERAL_DISTRIBUTED;
-    if (export_ephemeral_random) state |= fullbit::STATE_EPHEMERAL_RANDOM;
     add_primary_dentry(add_dir(dn->get_dir(), false), dn, in, state);
   }
   void add_primary_dentry(dirlump& lump, CDentry *dn, CInode *in, __u8 state) {
     if (!in) 
       in = dn->get_projected_linkage()->get_inode();
+
+    if (in->state_test(CInode::STATE_DISTEPHEMERALPIN)) {
+      state |= fullbit::STATE_EPHEMERAL_DISTRIBUTED;
+    }
+    if (in->state_test(CInode::STATE_RANDEPHEMERALPIN)) {
+      state |= fullbit::STATE_EPHEMERAL_RANDOM;
+    }
 
     // make note of where this inode was last journaled
     in->last_journaled = event_seq;

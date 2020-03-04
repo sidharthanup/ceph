@@ -140,7 +140,6 @@ MDCache::MDCache(MDSRank *m, PurgeQueue &purge_queue_) :
   filer(m->objecter, m->finisher),
   stray_manager(m, purge_queue_),
   recovery_queue(m),
-  ephemeral_pins(member_offset(CInode, ephemeral_pin_inode)),
   trim_counter(g_conf().get_val<double>("mds_cache_trim_decay_rate"))
 {
   migrator.reset(new Migrator(mds, this));
@@ -221,9 +220,9 @@ void MDCache::handle_conf_change(const std::set<std::string>& changed, const MDS
     cache_memory_limit = g_conf().get_val<Option::size_t>("mds_cache_memory_limit");
   if (changed.count("mds_cache_reservation"))
     cache_reservation = g_conf().get_val<double>("mds_cache_reservation");
-  if (changed.count("mds_export_ephemeral_distributed"))
+  if (changed.count("mds_export_ephemeral_distributed")) // TODO: potentially unset ephemeral pins
     export_ephemeral_distributed_config = g_conf().get_val<bool>("mds_export_ephemeral_distributed");
-  if (changed.count("mds_export_ephemeral_random"))
+  if (changed.count("mds_export_ephemeral_random")) // TODO: potentially unset ephemeral pins
     export_ephemeral_random_config = g_conf().get_val<bool>("mds_export_ephemeral_random");
   if (changed.count("mds_health_cache_threshold"))
     cache_health_threshold = g_conf().get_val<double>("mds_health_cache_threshold");
@@ -330,8 +329,6 @@ void MDCache::remove_inode(CInode *o)
   o->clear_scatter_dirty();
 
   o->item_open_file.remove_myself();
-
-  o->ephemeral_pin_inode.remove_myself();
 
   if (o->state_test(CInode::STATE_QUEUEDEXPORTPIN))
     export_pin_queue.erase(o);
@@ -846,8 +843,9 @@ MDSCacheObject *MDCache::get_object(const MDSCacheObjectInfo &info)
 /*
  * hashing implementation based on Lamping and Veach's Jump Consistent Hash: https://arxiv.org/pdf/1406.2294.pdf
 */
-mds_rank_t MDCache::hash_into_rank_bucket(inodeno_t ino, mds_rank_t max_mds)
+mds_rank_t MDCache::hash_into_rank_bucket(inodeno_t ino)
 {
+  const mds_rank_t max_mds = mds->mdsmap->get_max_mds();
   uint64_t hash = rjhash64(ino);
   int64_t b = -1, j = 0;
   while (j < max_mds) {
@@ -7819,6 +7817,7 @@ bool MDCache::shutdown_pass()
 
     migrator->clear_export_queue();
 
+#if 0
     if (export_ephemeral_random_config ||
         export_ephemeral_distributed_config) {
        dout(10) << "Migrating ephemerally pinned inodes due to shutdown" << dendl;
@@ -7834,6 +7833,7 @@ bool MDCache::shutdown_pass()
          ++it;
        }
     }
+#endif
 
     for (const auto& dir : ls) {
       mds_rank_t dest = dir->get_inode()->authority().first;
@@ -13305,6 +13305,7 @@ void MDCache::handle_mdsmap(const MDSMap &mdsmap, const MDSMap &oldmap) {
   }
 
   /* Handle consistent hash ring during cluster resizes */
+  #if 0
   if (mdsmap.get_max_mds() != oldmap.get_max_mds()) {
     dout(10) << "Checking ephemerally pinned directories for re-export due to max_mds change." << dendl;
     auto it = ephemeral_pins.begin(member_offset(CInode, ephemeral_pin_inode));
@@ -13325,4 +13326,5 @@ void MDCache::handle_mdsmap(const MDSMap &mdsmap, const MDSMap &oldmap) {
       }
     }
   }
+  #endif
 }
