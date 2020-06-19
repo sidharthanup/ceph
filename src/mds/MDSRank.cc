@@ -762,6 +762,9 @@ void MDSRankDispatcher::tick()
 	set_mdsmap_multimds_snaps_allowed();
       }
     }
+
+    if (whoami == 0)
+      scrubstack->advance_scrub_status();
   }
 
   if (is_active() || is_stopping()) {
@@ -1171,6 +1174,7 @@ bool MDSRank::is_valid_message(const cref_t<Message> &m) {
       type == MSG_MDS_LOCK ||
       type == MSG_MDS_INODEFILECAPS ||
       type == MSG_MDS_SCRUB ||
+      type == MSG_MDS_SCRUB_STATS ||
       type == CEPH_MSG_CLIENT_CAPS ||
       type == CEPH_MSG_CLIENT_CAPRELEASE ||
       type == CEPH_MSG_CLIENT_LEASE) {
@@ -1257,6 +1261,7 @@ void MDSRank::handle_message(const cref_t<Message> &m)
       break;
 
     case MSG_MDS_SCRUB:
+    case MSG_MDS_SCRUB_STATS:
       ALLOW_MESSAGES_FROM(CEPH_ENTITY_TYPE_MDS);
       scrubstack->dispatch(m);
       break;
@@ -2609,6 +2614,12 @@ void MDSRankDispatcher::handle_asok_command(
     r = config_client(client_id, !got_value, option, value, ss);
   } else if (command == "scrub start" ||
 	     command == "scrub_start") {
+    if (whoami != 0) {
+      ss << "Not rank 0";
+      r = -EXDEV;
+      goto out;
+    }
+
     string path;
     string tag;
     vector<string> scrubop_vec;
@@ -2665,6 +2676,11 @@ void MDSRankDispatcher::handle_asok_command(
   } else if (command == "scrub status") {
     command_scrub_status(f);
   } else if (command == "tag path") {
+    if (whoami != 0) {
+      ss << "Not rank 0";
+      r = -EXDEV;
+      goto out;
+    }
     string path;
     cmd_getval(cmdmap, "path", path);
     string tag;
