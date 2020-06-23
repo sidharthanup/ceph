@@ -11587,6 +11587,8 @@ int Client::_do_setxattr(Inode *in, const char *name, const void *value,
   // If the size is set to 0, set the value to an empty string
   if (size == 0) {
     value = "";
+  } else if (value == NULL) {
+      return -EINVAL;
   }
   if (flags & XATTR_CREATE)
     xattr_flags |= CEPH_XATTR_CREATE;
