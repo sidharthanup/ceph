@@ -11644,7 +11644,7 @@ int Client::_setxattr(Inode *in, const char *name, const void *value,
 	if (ret < 0)
 	  return ret;
 	if (ret == 0) {
-	  size = 0;
+	  return _removexattr(in, name, perms);
 	}
 	if (new_mode != in->mode) {
 	  struct ceph_statx stx;
@@ -11662,7 +11662,7 @@ int Client::_setxattr(Inode *in, const char *name, const void *value,
 	if (ret < 0)
 	  return -EINVAL;
 	if (ret == 0) {
-	  size = 0;
+	  return _removexattr(in, name, perms);
 	}
       }
     } else {
